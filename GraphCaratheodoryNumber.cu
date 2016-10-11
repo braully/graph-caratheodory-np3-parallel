@@ -18,7 +18,7 @@
 
 
 #define verboseSerial false
-#define verboseParallel true
+#define verboseParallel false
 
 __host__ __device__
 long maxCombinations(long n, long k) {
@@ -57,6 +57,26 @@ long maxCombinations(long n, long k, unsigned long *cacheMaxCombination) {
 
 __host__ __device__
 void initialCombination(long n, long k, long* combinationArray, long idx, unsigned long *cacheMaxCombination) {
+    long a = n;
+    long b = k;
+    long x = (maxCombinations(n, k) - 1) - idx;
+    for (long i = 0; i < k; ++i) {
+        combinationArray[i] = a - 1;
+        while (maxCombinations(combinationArray[i], b) > x) {
+            --combinationArray[i];
+        }
+        x = x - maxCombinations(combinationArray[i], b);
+        a = combinationArray[i];
+        b = b - 1;
+    }
+
+    for (long i = 0; i < k; ++i) {
+        combinationArray[i] = (n - 1) - combinationArray[i];
+    }
+}
+
+__host__ __device__
+void initialCombination(long n, long k, long* combinationArray, long idx) {
     long a = n;
     long b = k;
     long x = (maxCombinations(n, k) - 1) - idx;
@@ -299,8 +319,8 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
         unsigned long *cacheMaxCombination) {
     long idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (verboseParallel)
-        printf("\nThread-%d: szoffset=%d nvs=%d k=%d max=%d offset=%d\n", idx, nvertices,
-            sizeRowOffset, k, maxCombination, offset);
+        printf("\nThread-%d: szoffset=%d nvs=%d k=%d max=%d offset=%d\n", idx,
+            sizeRowOffset, nvertices, k, maxCombination, offset);
     bool found = false;
     long *currentCombination = (long *) malloc(k * sizeof (long));
     long auxoffset = idx*nvertices;
@@ -317,7 +337,6 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
 
     if (verboseParallel)
         printf("\nThread-%d: k=%d(%d-%d)\n", idx, k, i, limmit);
-
     initialCombination(nvertices, k, currentCombination, i, cacheMaxCombination);
 
     while (i < limmit && !found && !result[0]) {
@@ -332,8 +351,8 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
         for (long j = 0; j < k; j++) {
             tailQueue = (tailQueue + 1) % maxSizeQueue;
             queue[tailQueue] = currentCombination[j];
-            aux[auxoffset + currentCombination[i]] = INCLUDED;
-            auxc[auxoffset + currentCombination[i]] = 1;
+            aux[auxoffset + currentCombination[j]] = INCLUDED;
+            auxc[auxoffset + currentCombination[j]] = 1;
         }
 
         while (headQueue <= tailQueue) {
@@ -416,7 +435,8 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
     if (found) {
         result[0] = sizederivated;
         result[1] = (i - 1);
-        printf("\nParallel find\n");
+        if (verboseParallel)
+            printf("\nParallel find\n");
     }
     free(queue);
     free(currentCombination);
@@ -448,8 +468,8 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
     long numBytesRowOff = sizeof (long)*sizeRowOffset;
     cudaMalloc((void**) &csrRowOffsetGpu, numBytesRowOff);
 
-    cudaMalloc((void**) &auxGpu, sizeof (unsigned char)*(DEFAULT_THREAD_PER_BLOCK + 1) * nvs);
-    cudaMalloc((void**) &auxcGpu, sizeof (unsigned char)*(DEFAULT_THREAD_PER_BLOCK + 1) * nvs);
+    cudaMalloc((void**) &auxGpu, sizeof (unsigned char)*DEFAULT_THREAD_PER_BLOCK * nvs);
+    cudaMalloc((void**) &auxcGpu, sizeof (unsigned char)*DEFAULT_THREAD_PER_BLOCK * nvs);
     cudaMalloc((void**) &cacheMaxCombination, sizeof (unsigned long)*nvs);
     cudaMemset(cacheMaxCombination, 0, sizeof (unsigned long)*nvs);
 
@@ -485,7 +505,9 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
         }
 
         long offset = maxCombination / threadsPerBlock;
-
+        if (verboseParallel)
+            printf("\nkernelFindCaratheodoryNumber: szoffset=%d nvs=%d k=%d max=%d offset=%d\n",
+                sizeRowOffset, verticesCount, currentSize, maxCombination, offset);
         kernelFindCaratheodoryNumber << <1, threadsPerBlock>>> (csrColIdxsGpu, verticesCount,
                 csrRowOffsetGpu, sizeRowOffset, maxCombination, currentSize, offset, resultGpu,
                 auxGpu, auxcGpu, cacheMaxCombination);
@@ -495,7 +517,11 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
         currentSize--;
     }
     if (found) {
-        printf("Result Parallel: S=%d-Comb(%d,%d) |S| = %d |Hcp3(S)| = |V(g)| = %d\n",
+        printf("Result Parallel\n");
+        long *currentCombination = (long *) malloc((currentSize + 1) * sizeof (long));
+        initialCombination(verticesCount, (currentSize + 1), currentCombination, result[1]);
+        printCombination(currentCombination, currentSize + 1);
+        printf("\nS=%d-Comb(%d,%d) \n|S| = %d \n|∂H(S)| = %d\n",
                 result[1], nvs, currentSize + 1, currentSize + 1, result[0]);
     }
     cudaFree(resultGpu);

@@ -111,7 +111,7 @@ void processFile(std::string strFile, bool serial, bool parallel, bool verbose) 
 
 int main(int argc, char** argv) {
     long opt = 0;
-    char* strFile = "graph-test/graph-csr-8566306576678665541.txt";
+    char* strFile = "graph-test/graph-csr-8600395724125341047.txt";
     bool serial = false;
     bool parallel = false;
     bool verbose = false;
