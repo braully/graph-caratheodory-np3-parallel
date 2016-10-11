@@ -5,8 +5,8 @@
 #include <time.h>
 #include <cuda.h>
 
-#define DEFAULT_THREAD_PER_BLOCK 512
-#define MAX_DEFAULT_SIZE_QUEUE 200
+#define DEFAULT_THREAD_PER_BLOCK 32
+#define MAX_DEFAULT_SIZE_QUEUE 100
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
@@ -18,7 +18,7 @@
 
 
 #define verboseSerial false
-#define verboseParallel false
+#define verboseParallel true
 
 __host__ __device__
 long maxCombinations(long n, long k) {
@@ -298,6 +298,9 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
         long k, long offset, long *result, unsigned char *aux, unsigned char *auxc,
         unsigned long *cacheMaxCombination) {
     long idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (verboseParallel)
+        printf("\nThread-%d: szoffset=%d nvs=%d k=%d max=%d offset=%d\n", idx, nvertices,
+            sizeRowOffset, k, maxCombination, offset);
     bool found = false;
     long *currentCombination = (long *) malloc(k * sizeof (long));
     long auxoffset = idx*nvertices;
@@ -307,10 +310,13 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
     if (limmit > maxCombination) {
         limmit = maxCombination;
     }
-    long i = idx * offset;
 
+    long i = idx * offset;
     long maxSizeQueue = MAX(nvertices / 2, MAX_DEFAULT_SIZE_QUEUE);
     long *queue = (long *) malloc(maxSizeQueue * sizeof (long));
+
+    if (verboseParallel)
+        printf("\nThread-%d: k=%d(%d-%d)\n", idx, k, i, limmit);
 
     initialCombination(nvertices, k, currentCombination, i, cacheMaxCombination);
 
@@ -410,6 +416,7 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
     if (found) {
         result[0] = sizederivated;
         result[1] = (i - 1);
+        printf("\nParallel find\n");
     }
     free(queue);
     free(currentCombination);
@@ -420,7 +427,6 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
     clock_t parcial = clock();
 
     long nvs = graph->getVerticesCount();
-    long k;
     long currentSize = 0;
     long result[2];
     result[0] = result[1] = 0;
@@ -442,8 +448,8 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
     long numBytesRowOff = sizeof (long)*sizeRowOffset;
     cudaMalloc((void**) &csrRowOffsetGpu, numBytesRowOff);
 
-    cudaMalloc((void**) &auxGpu, sizeof (unsigned char)*DEFAULT_THREAD_PER_BLOCK * nvs);
-    cudaMalloc((void**) &auxcGpu, sizeof (unsigned char)*DEFAULT_THREAD_PER_BLOCK * nvs);
+    cudaMalloc((void**) &auxGpu, sizeof (unsigned char)*(DEFAULT_THREAD_PER_BLOCK + 1) * nvs);
+    cudaMalloc((void**) &auxcGpu, sizeof (unsigned char)*(DEFAULT_THREAD_PER_BLOCK + 1) * nvs);
     cudaMalloc((void**) &cacheMaxCombination, sizeof (unsigned long)*nvs);
     cudaMemset(cacheMaxCombination, 0, sizeof (unsigned long)*nvs);
 
@@ -472,9 +478,7 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
     currentSize = (nvs + 1) / 2;
 
     while (currentSize >= 2 && !found) {
-        k = currentSize;
-        long maxCombination = maxCombinations(nvs, k);
-
+        long maxCombination = maxCombinations(nvs, currentSize);
         long threadsPerBlock = DEFAULT_THREAD_PER_BLOCK;
         if (DEFAULT_THREAD_PER_BLOCK > maxCombination) {
             threadsPerBlock = maxCombination / 3;
@@ -483,15 +487,16 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
         long offset = maxCombination / threadsPerBlock;
 
         kernelFindCaratheodoryNumber << <1, threadsPerBlock>>> (csrColIdxsGpu, verticesCount,
-                csrRowOffsetGpu, sizeRowOffset, maxCombination, k, offset, resultGpu, auxGpu, auxcGpu,
-                cacheMaxCombination);
+                csrRowOffsetGpu, sizeRowOffset, maxCombination, currentSize, offset, resultGpu,
+                auxGpu, auxcGpu, cacheMaxCombination);
 
         cudaMemcpy(result, resultGpu, numBytesResult, cudaMemcpyDeviceToHost);
         found = (result[0] > 0);
         currentSize--;
     }
     if (found) {
-        printf("Result Parallel: S=%d-Comb(%d,%d) |S| = %d |Hcp3(S)| = |V(g)| = %d\n", result[1], nvs, k, k, result[0]);
+        printf("Result Parallel: S=%d-Comb(%d,%d) |S| = %d |Hcp3(S)| = |V(g)| = %d\n",
+                result[1], nvs, currentSize + 1, currentSize + 1, result[0]);
     }
     cudaFree(resultGpu);
     cudaFree(csrRowOffsetGpu);

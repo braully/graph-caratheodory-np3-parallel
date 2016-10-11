@@ -111,7 +111,6 @@ void processFile(std::string strFile, bool serial, bool parallel, bool verbose) 
 
 int main(int argc, char** argv) {
     long opt = 0;
-    //    char* strFile = "graph-test";
     char* strFile = "graph-test/graph-csr-8566306576678665541.txt";
     bool serial = false;
     bool parallel = false;
@@ -120,9 +119,6 @@ int main(int argc, char** argv) {
     if ((argc <= 1) || (argv[argc - 1] == NULL) || (argv[argc - 1][0] == '-')) {
         serial = true;
         parallel = true;
-        //        printf("\nusage: graph-hull-number [-ps] [input]");
-        //        printHelp();
-        //        return 1;
     } else {
         strFile = argv[argc - 1];
     }
