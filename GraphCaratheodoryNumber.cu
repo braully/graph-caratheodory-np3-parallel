@@ -499,12 +499,9 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
 
     while (currentSize >= 2 && !found) {
         long maxCombination = maxCombinations(nvs, currentSize);
-        long threadsPerBlock = DEFAULT_THREAD_PER_BLOCK;
-        if (DEFAULT_THREAD_PER_BLOCK > maxCombination) {
-            threadsPerBlock = maxCombination / 3;
-        }
+        long threadsPerBlock = MIN(ceil(maxCombination / 3.0), DEFAULT_THREAD_PER_BLOCK);
+        long offset = ceil(maxCombination / (double) threadsPerBlock);
 
-        long offset = maxCombination / threadsPerBlock;
         if (verboseParallel)
             printf("\nkernelFindCaratheodoryNumber: szoffset=%d nvs=%d k=%d max=%d offset=%d\n",
                 sizeRowOffset, verticesCount, currentSize, maxCombination, offset);
@@ -523,6 +520,8 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
         printCombination(currentCombination, currentSize + 1);
         printf("\nS=%d-Comb(%d,%d) \n|S| = %d \n|∂H(S)| = %d\n",
                 result[1], nvs, currentSize + 1, currentSize + 1, result[0]);
+    } else {
+        printf("Caratheodory set not found!\n");
     }
     cudaFree(resultGpu);
     cudaFree(csrRowOffsetGpu);
