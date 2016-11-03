@@ -30,7 +30,7 @@ void printHelp() {
     printf("\n\tinput: Graph file in format CSR, see graph-test.txt");
 }
 
-void processFile(std::string strFile, bool serial, bool parallel, bool verbose) {
+void processFile(std::string strFile, bool serial, bool parallel, bool verbose, bool binary) {
     std::string line, strCArray, strRArray;
     std::ifstream infile(strFile.c_str());
 
@@ -92,12 +92,20 @@ void processFile(std::string strFile, bool serial, bool parallel, bool verbose) 
     printf("Process file: %s\n", strFile.c_str());
 
     if (serial) {
-        serialFindCaratheodoryNumber(&csr);
+        if (binary) {
+            serialFindCaratheodoryNumberBinaryStrategy(&csr);
+        } else {
+            serialFindCaratheodoryNumber(&csr);
+        }
         printf("Total time serial: %ldms\n",
                 csr.getTotalTimeSerial());
     }
     if (parallel) {
-        parallelFindCaratheodoryNumber(&csr);
+        if (binary) {
+            parallelFindCaratheodoryNumberBinaryStrategy(&csr);
+        } else {
+            parallelFindCaratheodoryNumber(&csr);
+        }
         printf("Total time parallel: %ldms\n",
                 csr.getTotalTimeParallel());
     }
@@ -115,18 +123,23 @@ int main(int argc, char** argv) {
     bool serial = false;
     bool parallel = false;
     bool verbose = false;
+    bool binary = false;
 
     if ((argc <= 1) || (argv[argc - 1] == NULL) || (argv[argc - 1][0] == '-')) {
         serial = true;
-        parallel = true;
+        //        parallel = true;
+        binary = true;
     } else {
         strFile = argv[argc - 1];
     }
 
-    while ((opt = getopt(argc, argv, "psv")) != -1) {
+    while ((opt = getopt(argc, argv, "psvb")) != -1) {
         switch (opt) {
             case 'p':
                 parallel = true;
+                break;
+            case 'b':
+                binary = true;
                 break;
             case 's':
                 serial = true;
@@ -151,11 +164,11 @@ int main(int argc, char** argv) {
                 continue;
             if (stat(filepath.c_str(), &filestat)) continue;
             if (S_ISDIR(filestat.st_mode)) continue;
-            processFile(filepath, serial, parallel, verbose);
+            processFile(filepath, serial, parallel, verbose, binary);
         }
         closedir(dpdf);
     } else {
-        processFile(strFile, serial, parallel, verbose);
+        processFile(strFile, serial, parallel, verbose, binary);
     }
     return 0;
 }

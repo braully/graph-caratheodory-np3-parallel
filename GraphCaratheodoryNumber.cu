@@ -275,6 +275,61 @@ long checkCaratheodorySetP3(UndirectedCSRGraph *graph,
             aux, auxc, auxSize, currentCombination, sizeComb, idx);
 }
 
+void serialFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
+    graph->begin_serial_time = clock();
+
+    long nvs = graph->getVerticesCount();
+    long k;
+    unsigned char *aux = new unsigned char [nvs];
+    unsigned char *auxc = new unsigned char [nvs];
+    long *currentCombination;
+
+    long maxSizeSet = (nvs + 1) / 2;
+    long sizeCurrentHcp3 = 0;
+
+    int currentSize = maxSizeSet;
+    int left = 0;
+    int rigth = maxSizeSet;
+    bool foundGlobal = false;
+
+    currentCombination = (long *) malloc(maxSizeSet * sizeof (long));
+    long * lastCaratheodory = (long *) malloc(maxSizeSet * sizeof (long));
+
+    while (left <= rigth) {
+        currentSize = (left + rigth) / 2;
+        k = currentSize;
+        long maxCombination = maxCombinations(nvs, k);
+        initialCombination(nvs, k, currentCombination);
+
+        bool found = false;
+        for (long i = 0; i < maxCombination && !found; i++) {
+            sizeCurrentHcp3 = checkCaratheodorySetP3(graph, aux, auxc, nvs, currentCombination, k, i);
+            found = (sizeCurrentHcp3 > 0);
+            if (!found) {
+                nextCombination(nvs, k, currentCombination);
+            } else {
+                foundGlobal = true;
+                for (long j = 0; j < k; j++) {
+                    lastCaratheodory[j] = currentCombination[j];
+                }
+            }
+        }
+        if (found) {
+            left = currentSize + 1;
+        } else {
+            rigth = currentSize - 1;
+        }
+    }
+    if (foundGlobal) {
+        printf("Result\n");
+        printCombination(currentCombination, currentSize);
+        printf("\n|S| = %d\n|∂H(S)| = %d\n", k, sizeCurrentHcp3);
+    }
+    free(currentCombination);
+    free(aux);
+    graph->end_serial_time = clock();
+}
+
 void serialFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
     graph->begin_serial_time = clock();
 
@@ -440,6 +495,10 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
     }
     free(queue);
     free(currentCombination);
+}
+
+void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
+
 }
 
 void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {

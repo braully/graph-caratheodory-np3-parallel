@@ -11,6 +11,10 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph);
 
 void serialFindCaratheodoryNumber(UndirectedCSRGraph *graph);
 
+void serialFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph);
+
+void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph);
+
 int checkConvexityP3(UndirectedCSRGraph *graph,
         unsigned char *aux,
         int auxSize,
