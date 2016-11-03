@@ -119,7 +119,8 @@ void processFile(std::string strFile, bool serial, bool parallel, bool verbose, 
 
 int main(int argc, char** argv) {
     long opt = 0;
-    char* strFile = "graph-test/graph-csr-8600395724125341047.txt";
+    //    char* strFile = "graph-test/graph-csr-8600395724125341047.txt";
+    char* strFile = "graph-test/graph-csr-5515139440986580193.txt";
     bool serial = false;
     bool parallel = false;
     bool verbose = false;
@@ -127,8 +128,8 @@ int main(int argc, char** argv) {
 
     if ((argc <= 1) || (argv[argc - 1] == NULL) || (argv[argc - 1][0] == '-')) {
         serial = true;
-        parallel = true;
-        binary = true;
+        //        parallel = true;
+        //        binary = true;
     } else {
         strFile = argv[argc - 1];
     }

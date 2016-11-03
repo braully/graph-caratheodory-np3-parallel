@@ -6,7 +6,7 @@
 #include <cuda.h>
 
 #define DEFAULT_THREAD_PER_BLOCK 32
-#define MAX_DEFAULT_SIZE_QUEUE 100
+#define MAX_DEFAULT_SIZE_QUEUE 500
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
@@ -154,8 +154,8 @@ long calcDerivatedPartial(long *csrColIdxs, long nvertices,
         long headQueue = 0;
         long tailQueue = -1;
 
-        for (long i = 0; i < auxSize; i++) {
-            auxc[i] = 0;
+        for (long j = 0; j < auxSize; j++) {
+            auxc[j] = 0;
         }
 
         for (long j = 0; j < sizeComb; j++) {
@@ -170,10 +170,10 @@ long calcDerivatedPartial(long *csrColIdxs, long nvertices,
             long verti = queue[headQueue];
             headQueue = (headQueue + 1) % maxSizeQueue;
             aux[verti] = 0;
-            if (auxc[verti] < PROCESSED && verti < nvertices) {
+            if (verti < nvertices) {
                 long end = csrColIdxs[verti + 1];
-                for (long i = csrColIdxs[verti]; i < end; i++) {
-                    long vertn = csrRowOffset[i];
+                for (long x = csrColIdxs[verti]; x < end; x++) {
+                    long vertn = csrRowOffset[x];
                     if (vertn != verti) {
                         int previousValue = auxc[vertn];
                         auxc[vertn] = auxc[vertn] + NEIGHBOOR_COUNT_INCLUDED;
@@ -183,13 +183,12 @@ long calcDerivatedPartial(long *csrColIdxs, long nvertices,
                         }
                     }
                 }
-                auxc[verti] = PROCESSED;
             }
         }
     }
     long countDerivated = 0;
     for (long i = 0; i < auxSize; i++)
-        if (aux[i] > 0)
+        if (aux[i] >= INCLUDED)
             countDerivated++;
     return countDerivated;
 }
@@ -231,7 +230,7 @@ long checkCaratheodorySetP3CSR(long *csrColIdxs, long nvertices,
             printf("\tv-rm: %d", verti);
         }
 
-        if (aux[verti] < PROCESSED && verti < nvertices) {
+        if (verti < nvertices) {
             long end = csrColIdxs[verti + 1];
             for (long i = csrColIdxs[verti]; i < end; i++) {
                 long vertn = csrRowOffset[i];
@@ -247,7 +246,6 @@ long checkCaratheodorySetP3CSR(long *csrColIdxs, long nvertices,
                     }
                 }
             }
-            aux[verti] = aux[verti] + PROCESSED;
         }
     }
 
@@ -287,17 +285,16 @@ void serialFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
     long maxSizeSet = (nvs + 1) / 2;
     long sizeCurrentHcp3 = 0;
 
-    long currentSize = maxSizeSet;
     long left = 0;
     long rigth = maxSizeSet;
-    bool foundGlobal = false;
 
     currentCombination = (long *) malloc(maxSizeSet * sizeof (long));
     long * lastCaratheodory = (long *) malloc(maxSizeSet * sizeof (long));
+    long lastSize = -1;
+    long lastSizeHcp3 = -1;
 
     while (left <= rigth) {
-        currentSize = (left + rigth) / 2;
-        k = currentSize;
+        k = (left + rigth) / 2;
         long maxCombination = maxCombinations(nvs, k);
         initialCombination(nvs, k, currentCombination);
 
@@ -307,23 +304,23 @@ void serialFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
             found = (sizeCurrentHcp3 > 0);
             if (!found) {
                 nextCombination(nvs, k, currentCombination);
-            } else {
-                foundGlobal = true;
-                for (long j = 0; j < k; j++) {
-                    lastCaratheodory[j] = currentCombination[j];
-                }
             }
         }
         if (found) {
-            left = currentSize + 1;
+            left = k + 1;
+            lastSize = k;
+            lastSizeHcp3 = sizeCurrentHcp3;
+            for (long j = 0; j < k; j++) {
+                lastCaratheodory[j] = currentCombination[j];
+            }
         } else {
-            rigth = currentSize - 1;
+            rigth = k - 1;
         }
     }
-    if (foundGlobal) {
+    if (lastSize > 0) {
         printf("Result\n");
-        printCombination(currentCombination, currentSize);
-        printf("\n|S| = %d\n|∂H(S)| = %d\n", k, sizeCurrentHcp3);
+        printCombination(lastCaratheodory, lastSize);
+        printf("\n|S| = %d\n|∂H(S)| = %d\n", lastSize, lastSizeHcp3);
     }
     free(currentCombination);
     free(aux);
@@ -553,14 +550,16 @@ void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
     long currentSize = maxSizeSet;
     long left = 0;
     long rigth = maxSizeSet;
-    bool foundGlobal = false;
+
+    long lastSize = -1;
+    long lastIdxCaratheodorySet = -1;
+    long lastSizeHcp3 = -1;
 
     while (left <= rigth) {
         long maxCombination = maxCombinations(nvs, currentSize);
         long threadsPerBlock = MIN(ceil(maxCombination / 3.0), DEFAULT_THREAD_PER_BLOCK);
         long offset = ceil(maxCombination / (double) threadsPerBlock);
 
-        bool found = false;
         if (verboseParallel)
             printf("\nkernelFindCaratheodoryNumber: szoffset=%d nvs=%d k=%d max=%d offset=%d\n",
                 sizeRowOffset, verticesCount, currentSize, maxCombination, offset);
@@ -569,25 +568,23 @@ void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
                 auxGpu, auxcGpu, cacheMaxCombination);
 
         cudaMemcpy(result, resultGpu, numBytesResult, cudaMemcpyDeviceToHost);
-        found = (result[0] > 0);
 
-        if (found) {
-            foundGlobal = true;
+        if (result[0] > 0) {
+            lastSize = currentSize;
+            lastSizeHcp3 = result[0];
+            lastIdxCaratheodorySet = result[1];
             left = currentSize + 1;
-            //            for (long j = 0; j < k; j++) {
-            //                lastCaratheodory[j] = currentCombination[j];
-            //            }
         } else {
             rigth = currentSize - 1;
         }
     }
-    if (foundGlobal) {
+    if (lastSize > 0) {
         printf("Result Parallel\n");
-        long *currentCombination = (long *) malloc(currentSize * sizeof (long));
-        initialCombination(verticesCount, currentSize, currentCombination, result[1] + 1);
-        printCombination(currentCombination, currentSize);
+        long *currentCombination = (long *) malloc(lastSize * sizeof (long));
+        initialCombination(verticesCount, lastSize, currentCombination, lastIdxCaratheodorySet + 1);
+        printCombination(currentCombination, lastSize);
         printf("\nS=%d-Comb(%d,%d) \n|S| = %d \n|∂H(S)| = %d\n",
-                result[1], nvs, currentSize, currentSize, result[0]);
+                lastIdxCaratheodorySet, nvs, lastSize, lastSize, lastSizeHcp3);
     } else {
         printf("Caratheodory set not found!\n");
     }
