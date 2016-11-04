@@ -127,8 +127,8 @@ int main(int argc, char** argv) {
     bool binary = false;
 
     if ((argc <= 1) || (argv[argc - 1] == NULL) || (argv[argc - 1][0] == '-')) {
-        serial = true;
-        //        parallel = true;
+        //        serial = true;
+        parallel = true;
         //        binary = true;
     } else {
         strFile = argv[argc - 1];
