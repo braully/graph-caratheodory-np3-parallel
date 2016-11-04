@@ -562,7 +562,7 @@ void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
                     sizeRowOffset, verticesCount, k, maxCombination, offset);
         }
 
-        kernelFindCaratheodoryNumber<<<1,threadsPerBlock>>>(csrColIdxsGpu, verticesCount, csrRowOffsetGpu,
+        kernelFindCaratheodoryNumber << <1, threadsPerBlock>>>(csrColIdxsGpu, verticesCount, csrRowOffsetGpu,
                 sizeRowOffset, maxCombination, k, offset, resultGpu, auxGpu, auxcGpu, cacheMaxCombination);
         cudaMemcpy(result, resultGpu, numBytesResult, cudaMemcpyDeviceToHost);
 
@@ -571,6 +571,7 @@ void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
             lastSizeHcp3 = result[0];
             lastIdxCaratheodorySet = result[1];
             left = k + 1;
+            cudaMemset(resultGpu, 0, numBytesResult);
         } else {
             rigth = k - 1;
         }
