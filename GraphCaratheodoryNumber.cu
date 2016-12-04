@@ -5,7 +5,7 @@
 #include <time.h>
 #include <cuda.h>
 
-#define DEFAULT_THREAD_PER_BLOCK 128
+#define DEFAULT_THREAD_PER_BLOCK 512
 #define MAX_DEFAULT_SIZE_QUEUE 128
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
@@ -17,8 +17,10 @@
 //D. Knuth. The Art of Computer Programming: Generating All Combinations and Partitions. Number v. 3-4 in Art of Computer Programming. Addison-Wesley, 2005.
 
 
-#define verboseSerial false
-#define verboseParallel false
+#define verboseSerial true
+#define verboseSerialDetailed false
+#define verboseParallel true
+#define verboseParallelDetailed false
 
 __host__ __device__
 long maxCombinations(long n, long k) {
@@ -220,13 +222,13 @@ long checkCaratheodorySetP3CSR(long *csrColIdxs, long nvertices,
     long countExec = 1;
 
     while (headQueue <= tailQueue) {
-        if (verboseSerial) {
+        if (verboseSerialDetailed) {
             printf("\nP3(k=%2d,c=%ld)-%ld: ", sizeComb, idx, countExec++);
             prlongQueue(queue, headQueue, tailQueue);
         }
         long verti = queue[headQueue];
         headQueue = (headQueue + 1) % maxSizeQueue;
-        if (verboseSerial) {
+        if (verboseSerialDetailed) {
             printf("\tv-rm: %d", verti);
         }
 
@@ -297,6 +299,11 @@ void serialFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
         k = (left + rigth) / 2;
         long maxCombination = maxCombinations(nvs, k);
         initialCombination(nvs, k, currentCombination);
+
+        if (verboseSerial) {
+            printf("\nserialFindCaratheodoryNumber: nvs=%d k=%d max=%d\n",
+                    nvs, k, maxCombination);
+        }
 
         bool found = false;
         for (long i = 0; i < maxCombination && !found; i++) {
@@ -370,7 +377,7 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
         long k, long offset, long *result, unsigned char *aux, unsigned char *auxc,
         unsigned long *cacheMaxCombination) {
     long idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (verboseParallel)
+    if (verboseParallelDetailed)
         printf("\nThread-%d: szoffset=%d nvs=%d k=%d max=%d offset=%d\n", idx,
             sizeRowOffset, nvertices, k, maxCombination, offset);
     bool found = false;
@@ -387,7 +394,7 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
     long maxSizeQueue = MAX(nvertices / 2, MAX_DEFAULT_SIZE_QUEUE);
     long *queue = (long *) malloc(maxSizeQueue * sizeof (long));
 
-    if (verboseParallel)
+    if (verboseParallelDetailed)
         printf("\nThread-%d: k=%d(%d-%d)\n", idx, k, i, limmit);
     initialCombination(nvertices, k, currentCombination, i, cacheMaxCombination);
 
@@ -485,7 +492,7 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
     if (found) {
         result[0] = sizederivated;
         result[1] = i;
-        if (verboseParallel)
+        if (verboseParallelDetailed)
             printf("\nParallel find\n");
     }
     free(queue);
@@ -558,8 +565,8 @@ void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
         long offset = ceil(maxCombination / (double) threadsPerBlock);
 
         if (verboseParallel) {
-            printf("\nkernelFindCaratheodoryNumber: szoffset=%d nvs=%d k=%d max=%d offset=%d\n",
-                    sizeRowOffset, verticesCount, k, maxCombination, offset);
+            printf("\nkernelFindCaratheodoryNumber: szoffset=%d nvs=%d k=%d max=%d tdsPerBlock=%d offset=%d\n",
+                    sizeRowOffset, verticesCount, k, maxCombination, threadsPerBlock, offset);
         }
 
         kernelFindCaratheodoryNumber << <1, threadsPerBlock>>>(csrColIdxsGpu, verticesCount, csrRowOffsetGpu,
