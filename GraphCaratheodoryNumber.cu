@@ -5,7 +5,7 @@
 #include <time.h>
 #include <cuda.h>
 
-#define DEFAULT_THREAD_PER_BLOCK 512
+#define DEFAULT_THREAD_PER_BLOCK 128
 #define MAX_DEFAULT_SIZE_QUEUE 128
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
@@ -375,15 +375,14 @@ void serialFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
 __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
         long *csrRowOffset, long sizeRowOffset, long maxCombination,
         long k, long offset, long *result, unsigned char *aux, unsigned char *auxc,
-        unsigned long *cacheMaxCombination) {
+        unsigned long *cacheMaxCombination, long * queues, long maxSizeQueue, long *currentCombinations, long maxSizeCombination) {
     long idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (verboseParallelDetailed)
         printf("\nThread-%d: szoffset=%d nvs=%d k=%d max=%d offset=%d\n", idx,
             sizeRowOffset, nvertices, k, maxCombination, offset);
     bool found = false;
-    long *currentCombination = (long *) malloc(k * sizeof (long));
     long auxoffset = idx*nvertices;
-
+    long combinationoffset = idx*maxSizeCombination;
     long sizederivated = 0;
     long limmit = (idx + 1) * offset;
     if (limmit > maxCombination) {
@@ -391,12 +390,11 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
     }
 
     long i = idx * offset;
-    long maxSizeQueue = MAX(nvertices / 2, MAX_DEFAULT_SIZE_QUEUE);
     long *queue = (long *) malloc(maxSizeQueue * sizeof (long));
 
     if (verboseParallelDetailed)
         printf("\nThread-%d: k=%d(%d-%d)\n", idx, k, i, limmit);
-    initialCombination(nvertices, k, currentCombination, i, cacheMaxCombination);
+    initialCombination(nvertices, k, &currentCombinations[combinationoffset], i, cacheMaxCombination);
 
     while (i < limmit && !found && !result[0]) {
         long headQueue = 0;
@@ -409,12 +407,12 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
 
         for (long j = 0; j < k; j++) {
             tailQueue = (tailQueue + 1) % maxSizeQueue;
-            queue[tailQueue] = currentCombination[j];
-            aux[auxoffset + currentCombination[j]] = INCLUDED;
-            auxc[auxoffset + currentCombination[j]] = 1;
+            queue[tailQueue] = currentCombinations[combinationoffset + j];
+            aux[auxoffset + currentCombinations[combinationoffset + j]] = INCLUDED;
+            auxc[auxoffset + currentCombinations[combinationoffset + j]] = 1;
         }
 
-        while (headQueue <= tailQueue) {
+        while (headQueue <= tailQueue && !result[0]) {
             long verti = queue[headQueue];
             headQueue = (headQueue + 1) % maxSizeQueue;
 
@@ -440,7 +438,7 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
         for (long z = 0; z < nvertices; z++) {
             if (auxc[auxoffset + z] >= k) {
                 for (long t = 0; t < k; t++) {
-                    long p = currentCombination[t];
+                    long p = currentCombinations[combinationoffset + t];
                     long headQueue = 0;
                     long tailQueue = -1;
 
@@ -449,14 +447,14 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
                     }
 
                     for (long j = 0; j < k; j++) {
-                        long v = currentCombination[j];
+                        long v = currentCombinations[combinationoffset + j];
                         if (v != p) {
                             tailQueue = (tailQueue + 1) % maxSizeQueue;
                             queue[tailQueue] = v;
                             auxc[auxoffset + v] = INCLUDED;
                         }
                     }
-                    while (headQueue <= tailQueue) {
+                    while (headQueue <= tailQueue && !result[0]) {
                         long verti = queue[headQueue];
                         headQueue = (headQueue + 1) % maxSizeQueue;
                         aux[auxoffset + verti] = 0;
@@ -485,7 +483,7 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
         }
         found = (sizederivated > 0);
         if (!found) {
-            nextCombination(nvertices, k, currentCombination);
+            nextCombination(nvertices, k, &currentCombinations[combinationoffset]);
             i++;
         }
     }
@@ -496,7 +494,6 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
             printf("\nParallel find\n");
     }
     free(queue);
-    free(currentCombination);
 }
 
 void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
@@ -523,6 +520,12 @@ void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
     long numBytesRowOff = sizeof (long)*sizeRowOffset;
     cudaMalloc((void**) &csrRowOffsetGpu, numBytesRowOff);
 
+    long *currentCombinations;
+    long *queues;
+    long maxSizeQueue = MAX(verticesCount / 2, MAX_DEFAULT_SIZE_QUEUE);
+    long maxCombinationSize = (verticesCount + 1 / 2);
+    cudaMalloc((void**) &queues, sizeof (long) * DEFAULT_THREAD_PER_BLOCK * maxSizeQueue);
+    cudaMalloc((void**) &currentCombinations, sizeof (long) * DEFAULT_THREAD_PER_BLOCK * maxCombinationSize);
     cudaMalloc((void**) &auxGpu, sizeof (unsigned char) * DEFAULT_THREAD_PER_BLOCK * verticesCount);
     cudaMalloc((void**) &auxcGpu, sizeof (unsigned char) * DEFAULT_THREAD_PER_BLOCK * verticesCount);
     cudaMalloc((void**) &cacheMaxCombination, sizeof (unsigned long) * verticesCount);
@@ -557,7 +560,7 @@ void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
     long lastSize = -1;
     long lastIdxCaratheodorySet = -1;
     long lastSizeHcp3 = -1;
-
+    clock_t start;
     while (left <= rigth) {
         k = (left + rigth) / 2;
         long maxCombination = maxCombinations(verticesCount, k);
@@ -565,13 +568,19 @@ void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
         long offset = ceil(maxCombination / (double) threadsPerBlock);
 
         if (verboseParallel) {
-            printf("\nkernelFindCaratheodoryNumber: szoffset=%d nvs=%d k=%d max=%d tdsPerBlock=%d offset=%d\n",
+            start = clock();
+            printf("\nkernelFindCaratheodoryNumber: szoffset=%d nvs=%d k=%d max=%d tdsPerBlock=%d offset=%d",
                     sizeRowOffset, verticesCount, k, maxCombination, threadsPerBlock, offset);
         }
 
         kernelFindCaratheodoryNumber << <1, threadsPerBlock>>>(csrColIdxsGpu, verticesCount, csrRowOffsetGpu,
-                sizeRowOffset, maxCombination, k, offset, resultGpu, auxGpu, auxcGpu, cacheMaxCombination);
+                sizeRowOffset, maxCombination, k, offset, resultGpu, auxGpu, auxcGpu, cacheMaxCombination,
+                queues, maxSizeQueue, currentCombinations, maxCombinationSize);
         cudaMemcpy(result, resultGpu, numBytesResult, cudaMemcpyDeviceToHost);
+
+        if (verboseParallel) {
+            printf(" t=%d\n", ((clock() - start) / (CLOCKS_PER_SEC / 1000)));
+        }
 
         if (result[0] > 0) {
             lastSize = k;
@@ -627,6 +636,12 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
     long numBytesRowOff = sizeof (long)*sizeRowOffset;
     cudaMalloc((void**) &csrRowOffsetGpu, numBytesRowOff);
 
+    long *currentCombinations;
+    long *queues;
+    long maxSizeQueue = MAX(verticesCount / 2, MAX_DEFAULT_SIZE_QUEUE);
+    long maxCombinationSize = (verticesCount + 1 / 2);
+    cudaMalloc((void**) &queues, sizeof (long) * DEFAULT_THREAD_PER_BLOCK * maxSizeQueue);
+    cudaMalloc((void**) &currentCombinations, sizeof (long) * DEFAULT_THREAD_PER_BLOCK * maxCombinationSize);
     cudaMalloc((void**) &auxGpu, sizeof (unsigned char)*DEFAULT_THREAD_PER_BLOCK * nvs);
     cudaMalloc((void**) &auxcGpu, sizeof (unsigned char)*DEFAULT_THREAD_PER_BLOCK * nvs);
     cudaMalloc((void**) &cacheMaxCombination, sizeof (unsigned long)*nvs);
@@ -665,7 +680,8 @@ void parallelFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
                 sizeRowOffset, verticesCount, currentSize, maxCombination, offset);
         kernelFindCaratheodoryNumber << <1, threadsPerBlock>>> (csrColIdxsGpu, verticesCount,
                 csrRowOffsetGpu, sizeRowOffset, maxCombination, currentSize, offset, resultGpu,
-                auxGpu, auxcGpu, cacheMaxCombination);
+                auxGpu, auxcGpu, cacheMaxCombination,
+                queues, maxSizeQueue, currentCombinations, maxCombinationSize);
 
         cudaMemcpy(result, resultGpu, numBytesResult, cudaMemcpyDeviceToHost);
         found = (result[0] > 0);
