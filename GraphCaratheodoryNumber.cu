@@ -5,7 +5,7 @@
 #include <time.h>
 #include <cuda.h>
 
-#define DEFAULT_THREAD_PER_BLOCK 128
+#define DEFAULT_THREAD_PER_BLOCK 64
 #define MAX_DEFAULT_SIZE_QUEUE 128
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
@@ -128,7 +128,7 @@ __host__ __device__ void printCombination(long *currentCombination,
             printf(", ");
         }
     }
-    printf("}");
+    printf(" }");
 }
 
 __host__ __device__
@@ -140,7 +140,7 @@ void prlongQueue(long *queue, long headQueue, long tailQueue) {
             printf(", ");
         }
     }
-    printf("}\n");
+    printf(" }\n");
 }
 
 __host__ __device__
@@ -201,14 +201,13 @@ long checkCaratheodorySetP3CSR(long *csrColIdxs, long nvertices,
         unsigned char *aux, unsigned char *auxc,
         long auxSize,
         long *currentCombination,
-        long sizeComb, long idx) {
+        long sizeComb, long idx, long *queue, long maxSizeQueue) {
     //clean aux vector            
     for (long i = 0; i < auxSize; i++) {
         aux[i] = 0;
         auxc[i] = 0;
     }
-    long maxSizeQueue = MAX((auxSize / 2), MAX_DEFAULT_SIZE_QUEUE);
-    long *queue = (long *) malloc(maxSizeQueue * sizeof (long));
+
     long headQueue = 0;
     long tailQueue = -1;
 
@@ -270,9 +269,11 @@ long checkCaratheodorySetP3(UndirectedCSRGraph *graph,
         long auxSize,
         long *currentCombination,
         long sizeComb, long idx) {
+    long maxSizeQueue = MAX((auxSize / 2), MAX_DEFAULT_SIZE_QUEUE);
+    long *queue = (long *) malloc(maxSizeQueue * sizeof (long));
     return checkCaratheodorySetP3CSR(graph->getCsrColIdxs(), graph->getVerticesCount(),
             graph->getCsrRowOffset(), graph->getSizeRowOffset(),
-            aux, auxc, auxSize, currentCombination, sizeComb, idx);
+            aux, auxc, auxSize, currentCombination, sizeComb, idx, queue, maxSizeQueue);
 }
 
 void serialFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
@@ -301,7 +302,7 @@ void serialFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
         initialCombination(nvs, k, currentCombination);
 
         if (verboseSerial) {
-            printf("\nserialFindCaratheodoryNumber: nvs=%d k=%d max=%d\n",
+            printf("\nserialFindCaratheodoryNumber: nvs=%d k=%d max=%d",
                     nvs, k, maxCombination);
         }
 
@@ -320,14 +321,20 @@ void serialFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
             for (long j = 0; j < k; j++) {
                 lastCaratheodory[j] = currentCombination[j];
             }
+            if (verboseSerial) {
+                printf("\nCaratheodory set size=%d..Ok", k);
+            }
         } else {
             rigth = k - 1;
+            if (verboseSerial) {
+                printf("\nCaratheodory set size=%d..Not", k);
+            }
         }
     }
     if (lastSize > 0) {
-        printf("Result\n");
+        printf("\nResult");
         printCombination(lastCaratheodory, lastSize);
-        printf("\n|S| = %d\n|∂H(S)| = %d\n", lastSize, lastSizeHcp3);
+        printf("\n|S| = %d\n|∂H(S)| = %d", lastSize, lastSizeHcp3);
     }
     free(currentCombination);
     free(aux);
@@ -361,9 +368,9 @@ void serialFindCaratheodoryNumber(UndirectedCSRGraph *graph) {
                 nextCombination(nvs, k, currentCombination);
         }
         if (found) {
-            printf("Result\n");
+            printf("\nResult");
             printCombination(currentCombination, currentSize);
-            printf("\n|S| = %d\n|∂H(S)| = %d\n", k, sizeCurrentHcp3);
+            printf("\n|S| = %d\n|∂H(S)| = %d", k, sizeCurrentHcp3);
         }
         currentSize--;
         free(currentCombination);
@@ -378,11 +385,12 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
         unsigned long *cacheMaxCombination, long * queues, long maxSizeQueue, long *currentCombinations, long maxSizeCombination) {
     long idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (verboseParallelDetailed)
-        printf("\nThread-%d: szoffset=%d nvs=%d k=%d max=%d offset=%d\n", idx,
+        printf("\nThread-%d: szoffset=%d nvs=%d k=%d max=%d offset=%d", idx,
             sizeRowOffset, nvertices, k, maxCombination, offset);
     bool found = false;
     long auxoffset = idx*nvertices;
     long combinationoffset = idx*maxSizeCombination;
+    long queueoffset = idx*maxSizeQueue;
     long sizederivated = 0;
     long limmit = (idx + 1) * offset;
     if (limmit > maxCombination) {
@@ -390,110 +398,119 @@ __global__ void kernelFindCaratheodoryNumber(long *csrColIdxs, long nvertices,
     }
 
     long i = idx * offset;
-    long *queue = (long *) malloc(maxSizeQueue * sizeof (long));
+
 
     if (verboseParallelDetailed)
-        printf("\nThread-%d: k=%d(%d-%d)\n", idx, k, i, limmit);
+        printf("\nThread-%d: k=%d(%d-%d)", idx, k, i, limmit);
     initialCombination(nvertices, k, &currentCombinations[combinationoffset], i, cacheMaxCombination);
 
     while (i < limmit && !found && !result[0]) {
-        long headQueue = 0;
-        long tailQueue = -1;
+        //        long headQueue = 0;
+        //        long tailQueue = -1;
 
-        for (long y = 0; y < nvertices; y++) {
-            aux[auxoffset + y] = 0;
-            auxc[auxoffset + y] = 0;
-        }
+        //        for (long y = 0; y < nvertices; y++) {
+        //            aux[auxoffset + y] = 0;
+        //            auxc[auxoffset + y] = 0;
+        //        }
+        //
+        //        for (long j = 0; j < k; j++) {
+        //            tailQueue = (tailQueue + 1) % maxSizeQueue;
+        //            queues[queueoffset + tailQueue] = currentCombinations[combinationoffset + j];
+        //            aux[auxoffset + currentCombinations[combinationoffset + j]] = INCLUDED;
+        //            auxc[auxoffset + currentCombinations[combinationoffset + j]] = 1;
+        //        }
+        //
+        //        while (headQueue <= tailQueue && !result[0]) {
+        //            long verti = queues[queueoffset + headQueue];
+        //            headQueue = (headQueue + 1) % maxSizeQueue;
+        //
+        //            if (verti < nvertices) {
+        //                long end = csrColIdxs[verti + 1];
+        //                for (long x = csrColIdxs[verti]; x < end; x++) {
+        //                    long vertn = csrRowOffset[x];
+        //                    if (vertn != verti && vertn < nvertices) {
+        //                        unsigned char previousValue = aux[auxoffset + vertn];
+        //                        aux[auxoffset + vertn] = aux[auxoffset + vertn] + NEIGHBOOR_COUNT_INCLUDED;
+        //                        if (previousValue < INCLUDED) {
+        //                            if (aux[auxoffset + vertn] >= INCLUDED) {
+        //                                tailQueue = (tailQueue + 1) % maxSizeQueue;
+        //                                queues[queueoffset + tailQueue] = vertn;
+        //                            }
+        //                            auxc[auxoffset + vertn] = auxc[auxoffset + vertn] + auxc[auxoffset + verti];
+        //                        }
+        //                    }
+        //                }
+        //            }
+        //        }
+        //
+        //        for (long z = 0; z < nvertices; z++) {
+        //            if (auxc[auxoffset + z] >= k) {
+        //                for (long t = 0; t < k; t++) {
+        //                    long p = currentCombinations[combinationoffset + t];
+        //                    long headQueue = 0;
+        //                    long tailQueue = -1;
+        //
+        //                    for (long q = 0; q < nvertices; q++) {
+        //                        auxc[auxoffset + q] = 0;
+        //                    }
+        //
+        //                    for (long j = 0; j < k; j++) {
+        //                        long v = currentCombinations[combinationoffset + j];
+        //                        if (v != p) {
+        //                            tailQueue = (tailQueue + 1) % maxSizeQueue;
+        //                            queues[queueoffset + tailQueue] = v;
+        //                            auxc[auxoffset + v] = INCLUDED;
+        //                        }
+        //                    }
+        //                    while (headQueue <= tailQueue && !result[0]) {
+        //                        long verti = queues[queueoffset + headQueue];
+        //                        headQueue = (headQueue + 1) % maxSizeQueue;
+        //                        aux[auxoffset + verti] = 0;
+        //                        if (verti < nvertices) {
+        //                            long end = csrColIdxs[verti + 1];
+        //                            for (long w = csrColIdxs[verti]; w < end; w++) {
+        //                                long vertn = csrRowOffset[w];
+        //                                if (vertn != verti) {
+        //                                    int previousValue = auxc[auxoffset + vertn];
+        //                                    auxc[auxoffset + vertn] = auxc[auxoffset + vertn] + NEIGHBOOR_COUNT_INCLUDED;
+        //                                    if (previousValue < INCLUDED && auxc[auxoffset + vertn] >= INCLUDED) {
+        //                                        tailQueue = (tailQueue + 1) % maxSizeQueue;
+        //                                        queues[queueoffset + tailQueue] = vertn;
+        //                                    }
+        //                                }
+        //                            }
+        //                        }
+        //                    }
+        //                }
+        //                sizederivated = 0;
+        //                for (long j = 0; j < nvertices; j++)
+        //                    if (aux[auxoffset + j] >= INCLUDED)
+        //                        sizederivated++;
+        //                break;
+        //            }
+        //        }
+        sizederivated = checkCaratheodorySetP3CSR(csrColIdxs, nvertices, csrRowOffset, sizeRowOffset,
+                &aux[auxoffset], &auxc[auxoffset], nvertices, &currentCombinations[combinationoffset],
+                k, i, &queues[queueoffset], maxSizeQueue);
 
-        for (long j = 0; j < k; j++) {
-            tailQueue = (tailQueue + 1) % maxSizeQueue;
-            queue[tailQueue] = currentCombinations[combinationoffset + j];
-            aux[auxoffset + currentCombinations[combinationoffset + j]] = INCLUDED;
-            auxc[auxoffset + currentCombinations[combinationoffset + j]] = 1;
-        }
-
-        while (headQueue <= tailQueue && !result[0]) {
-            long verti = queue[headQueue];
-            headQueue = (headQueue + 1) % maxSizeQueue;
-
-            if (verti < nvertices) {
-                long end = csrColIdxs[verti + 1];
-                for (long x = csrColIdxs[verti]; x < end; x++) {
-                    long vertn = csrRowOffset[x];
-                    if (vertn != verti && vertn < nvertices) {
-                        unsigned char previousValue = aux[auxoffset + vertn];
-                        aux[auxoffset + vertn] = aux[auxoffset + vertn] + NEIGHBOOR_COUNT_INCLUDED;
-                        if (previousValue < INCLUDED) {
-                            if (aux[auxoffset + vertn] >= INCLUDED) {
-                                tailQueue = (tailQueue + 1) % maxSizeQueue;
-                                queue[tailQueue] = vertn;
-                            }
-                            auxc[auxoffset + vertn] = auxc[auxoffset + vertn] + auxc[auxoffset + verti];
-                        }
-                    }
-                }
-            }
-        }
-
-        for (long z = 0; z < nvertices; z++) {
-            if (auxc[auxoffset + z] >= k) {
-                for (long t = 0; t < k; t++) {
-                    long p = currentCombinations[combinationoffset + t];
-                    long headQueue = 0;
-                    long tailQueue = -1;
-
-                    for (long q = 0; q < nvertices; q++) {
-                        auxc[auxoffset + q] = 0;
-                    }
-
-                    for (long j = 0; j < k; j++) {
-                        long v = currentCombinations[combinationoffset + j];
-                        if (v != p) {
-                            tailQueue = (tailQueue + 1) % maxSizeQueue;
-                            queue[tailQueue] = v;
-                            auxc[auxoffset + v] = INCLUDED;
-                        }
-                    }
-                    while (headQueue <= tailQueue && !result[0]) {
-                        long verti = queue[headQueue];
-                        headQueue = (headQueue + 1) % maxSizeQueue;
-                        aux[auxoffset + verti] = 0;
-                        if (verti < nvertices) {
-                            long end = csrColIdxs[verti + 1];
-                            for (long w = csrColIdxs[verti]; w < end; w++) {
-                                long vertn = csrRowOffset[w];
-                                if (vertn != verti) {
-                                    int previousValue = auxc[auxoffset + vertn];
-                                    auxc[auxoffset + vertn] = auxc[auxoffset + vertn] + NEIGHBOOR_COUNT_INCLUDED;
-                                    if (previousValue < INCLUDED && auxc[auxoffset + vertn] >= INCLUDED) {
-                                        tailQueue = (tailQueue + 1) % maxSizeQueue;
-                                        queue[tailQueue] = vertn;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                sizederivated = 0;
-                for (long j = 0; j < nvertices; j++)
-                    if (aux[auxoffset + j] >= INCLUDED)
-                        sizederivated++;
-                break;
-            }
-        }
         found = (sizederivated > 0);
         if (!found) {
             nextCombination(nvertices, k, &currentCombinations[combinationoffset]);
             i++;
         }
+        //        else {
+        //            result[0] = sizederivated;
+        //            result[1] = i;
+        //            if (verboseParallelDetailed)
+        //                printf("\nParallel find");
+        //        }
     }
     if (found) {
         result[0] = sizederivated;
         result[1] = i;
         if (verboseParallelDetailed)
-            printf("\nParallel find\n");
+            printf("\nParallel find");
     }
-    free(queue);
 }
 
 void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
@@ -524,12 +541,19 @@ void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
     long *queues;
     long maxSizeQueue = MAX(verticesCount / 2, MAX_DEFAULT_SIZE_QUEUE);
     long maxCombinationSize = (verticesCount + 1 / 2);
-    cudaMalloc((void**) &queues, sizeof (long) * DEFAULT_THREAD_PER_BLOCK * maxSizeQueue);
-    cudaMalloc((void**) &currentCombinations, sizeof (long) * DEFAULT_THREAD_PER_BLOCK * maxCombinationSize);
-    cudaMalloc((void**) &auxGpu, sizeof (unsigned char) * DEFAULT_THREAD_PER_BLOCK * verticesCount);
-    cudaMalloc((void**) &auxcGpu, sizeof (unsigned char) * DEFAULT_THREAD_PER_BLOCK * verticesCount);
-    cudaMalloc((void**) &cacheMaxCombination, sizeof (unsigned long) * verticesCount);
+    long memoryQueue = sizeof (long) * DEFAULT_THREAD_PER_BLOCK * maxSizeQueue;
+    cudaMalloc((void**) &queues, memoryQueue);
+    long memoryCombination = sizeof (long) * DEFAULT_THREAD_PER_BLOCK * maxCombinationSize;
+    cudaMalloc((void**) &currentCombinations, memoryCombination);
+    long memoryAux = sizeof (unsigned char) * DEFAULT_THREAD_PER_BLOCK * verticesCount;
+    cudaMalloc((void**) &auxGpu, memoryAux);
+    long memoryAuxc = sizeof (unsigned char) * DEFAULT_THREAD_PER_BLOCK * verticesCount;
+    cudaMalloc((void**) &auxcGpu, memoryAuxc);
+    long memoryCache = sizeof (unsigned long) * verticesCount;
+    cudaMalloc((void**) &cacheMaxCombination, memoryCache);
     cudaMemset(cacheMaxCombination, 0, sizeof (unsigned long) * verticesCount);
+
+    //    memoryQueue + memoryCombination + memoryAux + memoryAuxc + memoryCache + numBytesClsIdx + numBytesRowOff
 
     long numBytesResult = sizeof (long)*2;
     cudaMalloc((void**) &resultGpu, numBytesResult);
@@ -573,13 +597,21 @@ void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
                     sizeRowOffset, verticesCount, k, maxCombination, threadsPerBlock, offset);
         }
 
+        //        if (k > 1) {
+        //        kernelFindCaratheodoryNumber << <1, threadsPerBlock, memoryQueue + memoryCombination + memoryAux + memoryAuxc + memoryCache + numBytesClsIdx + numBytesRowOff + numBytesResult>>>(csrColIdxsGpu, verticesCount, csrRowOffsetGpu,
+        //                sizeRowOffset, maxCombination, k, offset, resultGpu, auxGpu, auxcGpu, cacheMaxCombination,
+        //                queues, maxSizeQueue, currentCombinations, maxCombinationSize);
         kernelFindCaratheodoryNumber << <1, threadsPerBlock>>>(csrColIdxsGpu, verticesCount, csrRowOffsetGpu,
                 sizeRowOffset, maxCombination, k, offset, resultGpu, auxGpu, auxcGpu, cacheMaxCombination,
                 queues, maxSizeQueue, currentCombinations, maxCombinationSize);
         cudaMemcpy(result, resultGpu, numBytesResult, cudaMemcpyDeviceToHost);
+        //        } else {
+        //            result[0] = 1;
+        //            result[1] = 0;
+        //        }
 
         if (verboseParallel) {
-            printf(" t=%d\n", ((clock() - start) / (CLOCKS_PER_SEC / 1000)));
+            printf(" t=%d", ((clock() - start) / (CLOCKS_PER_SEC / 1000)));
         }
 
         if (result[0] > 0) {
@@ -587,26 +619,36 @@ void parallelFindCaratheodoryNumberBinaryStrategy(UndirectedCSRGraph *graph) {
             lastSizeHcp3 = result[0];
             lastIdxCaratheodorySet = result[1];
             left = k + 1;
-            cudaMemset(resultGpu, 0, numBytesResult);
+            result[0] = result[1] = 0;
+            cudaMemcpy(resultGpu, result, numBytesResult, cudaMemcpyHostToDevice);
+            if (verboseParallel) {
+                printf("\nCaratheodory set size=%d..Ok idx=%d", k, lastIdxCaratheodorySet);
+            }
         } else {
             rigth = k - 1;
+            if (verboseParallel) {
+                printf("\nCaratheodory set size=%d..Not", k);
+            }
         }
     }
     if (lastSize > 0) {
-        printf("Result Parallel Binary\n");
+        printf("\nResult Parallel Binary");
         long *currentCombination = (long *) malloc(lastSize * sizeof (long));
         initialCombination(verticesCount, lastSize, currentCombination, lastIdxCaratheodorySet);
         printCombination(currentCombination, lastSize);
-        printf("\nS=%d-Comb(%d,%d) \n|S| = %d \n|∂H(S)| = %d\n",
-                lastIdxCaratheodorySet, verticesCount, lastSize, lastSize, lastSizeHcp3);
+        printf("\nS=%d-Comb(%d,%d) \n|S| = %d",
+                lastIdxCaratheodorySet, verticesCount, lastSize, lastSize);
     } else {
-        printf("Caratheodory set not found!\n");
+        printf("\nCaratheodory set not found!");
     }
     cudaFree(resultGpu);
     cudaFree(csrRowOffsetGpu);
     cudaFree(csrColIdxsGpu);
     cudaFree(auxGpu);
+    cudaFree(auxcGpu);
     cudaFree(cacheMaxCombination);
+    cudaFree(queues);
+    cudaFree(currentCombinations);
     graph->end_parallel_time = clock();
 }
 

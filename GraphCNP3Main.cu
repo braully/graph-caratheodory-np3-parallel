@@ -84,12 +84,12 @@ void processFile(std::string strFile, bool serial, bool parallel, bool verbose, 
 
     UndirectedCSRGraph csr(colIdx, numVertices, rowOffset, sizeRowOffset);
     if (verbose) {
-        printf("Graph detail: ");
+        printf("\nGraph detail: ");
         csr.printGraph();
-        printf("\n");
+//        printf("\n");
     }
 
-    printf("Process file: %s\n", strFile.c_str());
+    printf("\nProcess file: %s", strFile.c_str());
 
     if (serial) {
         if (binary) {
@@ -97,7 +97,7 @@ void processFile(std::string strFile, bool serial, bool parallel, bool verbose, 
         } else {
             serialFindCaratheodoryNumber(&csr);
         }
-        printf("Total time serial: %ldms\n",
+        printf("\nTotal time serial: %ldms",
                 csr.getTotalTimeSerial());
     }
     if (parallel) {
@@ -106,13 +106,13 @@ void processFile(std::string strFile, bool serial, bool parallel, bool verbose, 
         } else {
             parallelFindCaratheodoryNumber(&csr);
         }
-        printf("Total time parallel: %ldms\n",
+        printf("\nTotal time parallel: %ldms",
                 csr.getTotalTimeParallel());
     }
 
     if (serial && parallel) {
         double speedup = (double) csr.getTotalTimeSerial() / csr.getTotalTimeParallel();
-        printf("Speedup: %fx\n", speedup);
+        printf("\nSpeedup: %fx", speedup);
 
     }
 }
